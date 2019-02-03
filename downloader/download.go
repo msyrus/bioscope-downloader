@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/hex"
@@ -32,23 +33,66 @@ func Length(pls *m3u8.MediaPlaylist) int64 {
 }
 
 func Download(w io.Writer, pls *m3u8.MediaPlaylist) error {
-	for _, s := range pls.Segments {
-		if s != nil {
+	type encData struct {
+		data []byte
+		key  *m3u8.Key
+	}
+
+	errCh := make(chan error)
+	sigCh := make(chan *m3u8.MediaSegment, 1)
+	encCh := make(chan *encData, 1)
+	datCh := make(chan []byte, 1)
+	ctx, done := context.WithCancel(context.Background())
+
+	go func() {
+		for s := range sigCh {
 			data, err := FetchSigment(s)
 			if err != nil {
-				return err
+				errCh <- err
+				return
 			}
+			encCh <- &encData{data, s.Key}
+		}
+		close(encCh)
+	}()
 
-			data, err = DecodeSigment(data, s)
+	go func() {
+		for e := range encCh {
+			data, err := DecodeSigment(e.data, e.key.URI, e.key.IV)
 			if err != nil {
-				return err
+				errCh <- err
+				return
 			}
+			datCh <- data
+		}
+		close(datCh)
+	}()
 
-			if _, err = w.Write(data); err != nil {
-				return err
+	go func() {
+		for d := range datCh {
+			if _, err := w.Write(d); err != nil {
+				errCh <- err
+				return
 			}
 		}
+		done()
+	}()
+
+	go func() {
+		for _, s := range pls.Segments {
+			if s != nil {
+				sigCh <- s
+			}
+		}
+		close(sigCh)
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
 	}
+
 	return nil
 }
 
@@ -92,20 +136,16 @@ func toByteRange(o, l int64) string {
 	return fmt.Sprintf("bytes=%d-%d", o, (o + l - 1))
 }
 
-func DecodeSigment(src []byte, s *m3u8.MediaSegment) ([]byte, error) {
-	key, err := GetKey(s.Key.URI)
+func DecodeSigment(src []byte, keyURI, keyIV string) ([]byte, error) {
+	key, err := GetKey(keyURI)
+	if err != nil {
+		return nil, err
+	}
+	iv, err := PrepareIV(keyIV)
 	if err != nil {
 		return nil, err
 	}
 
-	ivs := s.Key.IV
-	if strings.HasPrefix(ivs, "0x") || strings.HasPrefix(ivs, "0X") {
-		ivs = ivs[2:]
-	}
-	iv, err := hex.DecodeString(ivs)
-	if err != nil {
-		return nil, err
-	}
 	dst := make([]byte, len(src))
 
 	block, err := aes.NewCipher(key)
@@ -116,6 +156,17 @@ func DecodeSigment(src []byte, s *m3u8.MediaSegment) ([]byte, error) {
 	cipher.NewCBCDecrypter(block, iv).CryptBlocks(dst, src)
 
 	return dst, nil
+}
+
+func PrepareIV(ivs string) ([]byte, error) {
+	if strings.HasPrefix(ivs, "0x") || strings.HasPrefix(ivs, "0X") {
+		ivs = ivs[2:]
+	}
+	iv, err := hex.DecodeString(ivs)
+	if err != nil {
+		return nil, err
+	}
+	return iv, nil
 }
 
 func GetKey(uri string) ([]byte, error) {
