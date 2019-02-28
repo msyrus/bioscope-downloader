@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/grafov/m3u8"
 	"gopkg.in/cheggaaa/pb.v1"
@@ -86,7 +87,8 @@ func main() {
 	bar.ShowSpeed = true
 	bar.ShowTimeLeft = true
 
-	f, err := os.OpenFile(id+".mp4", os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
+	name := id + "_" + strings.SplitN(lst[sel].Resolution, "x", 2)[1] + "p.mp4"
+	f, err := os.OpenFile(name, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
 	if err != nil {
 		log.Fatal(err)
 	}
