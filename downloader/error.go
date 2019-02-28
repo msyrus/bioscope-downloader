@@ -10,6 +10,7 @@ var (
 	ErrInvalidItemID = errors.New("downloader: invalid item id")
 	ErrNotFound      = errors.New("downloader: not found")
 	ErrUnsupported   = errors.New("downloader: unsupported type")
+	ErrOutOfRange    = errors.New("downloader: out of range")
 )
 
 type HTTPError struct {

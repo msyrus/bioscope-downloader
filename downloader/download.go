@@ -32,7 +32,31 @@ func Length(pls *m3u8.MediaPlaylist) int64 {
 	return l
 }
 
+func DownloadAfterBytes(w io.Writer, pls *m3u8.MediaPlaylist, n int64) error {
+	l := int64(0)
+	for i, s := range pls.Segments {
+		if s != nil {
+			l = l + s.Limit
+			if l > n {
+				return DownloadAfter(w, pls, i)
+			}
+		}
+	}
+	if n > l {
+		return ErrOutOfRange
+	}
+	return nil
+}
+
 func Download(w io.Writer, pls *m3u8.MediaPlaylist) error {
+	return DownloadAfter(w, pls, 0)
+}
+
+func DownloadAfter(w io.Writer, pls *m3u8.MediaPlaylist, i int) error {
+	if i >= len(pls.Segments) || i < 0 {
+		return ErrOutOfRange
+	}
+
 	type encData struct {
 		data []byte
 		key  *m3u8.Key
@@ -79,7 +103,8 @@ func Download(w io.Writer, pls *m3u8.MediaPlaylist) error {
 	}()
 
 	go func() {
-		for _, s := range pls.Segments {
+		for i := i; i < len(pls.Segments); i++ {
+			s := pls.Segments[i]
 			if s != nil {
 				sigCh <- s
 			}

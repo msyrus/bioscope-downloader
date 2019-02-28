@@ -85,15 +85,21 @@ func main() {
 	bar.ShowElapsedTime = true
 	bar.ShowSpeed = true
 	bar.ShowTimeLeft = true
-	bar.Start()
 
-	f, err := os.Create(id + ".mp4")
+	f, err := os.OpenFile(id+".mp4", os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer f.Close()
 
-	if err = downloader.Download(io.MultiWriter(f, bar), mplst); err != nil {
+	s, err := f.Stat()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	bar.Set64(s.Size())
+	bar.Start()
+	if err = downloader.DownloadAfterBytes(io.MultiWriter(f, bar), mplst, s.Size()); err != nil {
 		log.Fatal(err)
 	}
 
